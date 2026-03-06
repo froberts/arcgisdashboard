@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoTrace Dashboard</title>
+
+    <!-- ArcGIS Maps SDK for JavaScript -->
+    <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css">
+    <script src="https://js.arcgis.com/4.29/"></script>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        #viewDiv {
+            height: 100%;
+            width: 100%;
+        }
+
+        /* Header bar */
+        #header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: #2b2b2b;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            z-index: 100;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        #header h1 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 500;
+        }
+
+        #header .user-info {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #header .user-info span {
+            font-size: 0.875rem;
+        }
+
+        #header button {
+            background: #0079c1;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+
+        #header button:hover {
+            background: #005a8e;
+        }
+
+        /* Map container adjusted for header */
+        #mapContainer {
+            position: absolute;
+            top: 50px;
+            bottom: 0;
+            left: 0;
+            right: 0;
+        }
+
+        /* Login overlay */
+        #loginOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        #loginOverlay.hidden {
+            display: none;
+        }
+
+        .login-card {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            max-width: 400px;
+        }
+
+        .login-card h2 {
+            margin: 0 0 10px 0;
+            color: #2b2b2b;
+        }
+
+        .login-card p {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .login-card button {
+            background: #0079c1;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .login-card button:hover {
+            background: #005a8e;
+        }
+
+        /* Loading indicator */
+        #loadingIndicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #666;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0079c1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Time slider styling */
+        .esri-time-slider {
+            width: 100%;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div id="header">
+        <h1>GeoTrace Dashboard</h1>
+        <div class="user-info">
+            <span id="userDisplay"></span>
+            <button id="signOutBtn" style="display: none;">Sign Out</button>
+        </div>
+    </div>
+
+    <!-- Map Container -->
+    <div id="mapContainer">
+        <div id="viewDiv">
+            <div id="loadingIndicator">
+                <div class="spinner"></div>
+                <p>Loading map...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Overlay -->
+    <div id="loginOverlay">
+        <div class="login-card">
+            <h2>GeoTrace Dashboard</h2>
+            <p>Sign in with your ArcGIS Online account to access the map.</p>
+            <button id="signInBtn">Sign In with ArcGIS</button>
+        </div>
+    </div>
+
+    <script>
+        require([
+            "esri/WebMap",
+            "esri/views/MapView",
+            "esri/widgets/LayerList",
+            "esri/widgets/Expand",
+            "esri/widgets/TimeSlider",
+            "esri/identity/OAuthInfo",
+            "esri/identity/IdentityManager",
+            "esri/portal/Portal"
+        ], function(WebMap, MapView, LayerList, Expand, TimeSlider, OAuthInfo, IdentityManager, Portal) {
+
+            // Configuration
+            const CONFIG = {
+                // WebMap ID from ArcGIS Online
+                webMapId: "2ec50b2c5e4548528ee799d0f82bf41c",
+
+                // OAuth App ID - Register your app at https://developers.arcgis.com
+                // For now, using the portal URL for direct sign-in
+                portalUrl: "https://geotracesystems.maps.arcgis.com"
+            };
+
+            // DOM elements
+            const loginOverlay = document.getElementById("loginOverlay");
+            const signInBtn = document.getElementById("signInBtn");
+            const signOutBtn = document.getElementById("signOutBtn");
+            const userDisplay = document.getElementById("userDisplay");
+            const loadingIndicator = document.getElementById("loadingIndicator");
+
+            let view = null;
+
+            // Set up OAuth (using implicit flow)
+            const redirectUri = window.location.origin + window.location.pathname;
+            console.log("Redirect URI:", redirectUri);
+
+            const oAuthInfo = new OAuthInfo({
+                appId: "cGBFMBKikv3pkfVg",
+                portalUrl: CONFIG.portalUrl,
+                popup: false,
+                flowType: "implicit"
+            });
+            IdentityManager.registerOAuthInfos([oAuthInfo]);
+
+            // Check if user is already signed in
+            IdentityManager.checkSignInStatus(CONFIG.portalUrl + "/sharing")
+                .then(function(credential) {
+                    handleSignedIn(credential);
+                })
+                .catch(function() {
+                    // Not signed in, show login overlay
+                    loginOverlay.classList.remove("hidden");
+                    loadingIndicator.style.display = "none";
+                });
+
+            // Sign in button click
+            signInBtn.addEventListener("click", function() {
+                // Debug: Show the OAuth URL that would be used
+                const authUrl = CONFIG.portalUrl + "/sharing/oauth2/authorize?" +
+                    "client_id=" + oAuthInfo.appId +
+                    "&response_type=token" +
+                    "&redirect_uri=" + encodeURIComponent(window.location.origin + window.location.pathname);
+                console.log("Full OAuth URL:", authUrl);
+                console.log("redirect_uri parameter:", window.location.origin + window.location.pathname);
+
+                IdentityManager.getCredential(CONFIG.portalUrl + "/sharing", {
+                    oAuthPopupConfirmation: false
+                }).then(function(credential) {
+                    handleSignedIn(credential);
+                }).catch(function(error) {
+                    console.error("Sign in error:", error);
+                });
+            });
+
+            // Sign out button click
+            signOutBtn.addEventListener("click", function() {
+                IdentityManager.destroyCredentials();
+                window.location.reload();
+            });
+
+            // Handle successful sign in
+            function handleSignedIn(credential) {
+                // Hide login overlay
+                loginOverlay.classList.add("hidden");
+
+                // Get user info from portal
+                const portal = new Portal({
+                    url: CONFIG.portalUrl
+                });
+
+                portal.load().then(function() {
+                    userDisplay.textContent = portal.user.fullName || portal.user.username;
+                    signOutBtn.style.display = "block";
+
+                    // Load the map
+                    loadMap();
+                });
+            }
+
+            // Load the WebMap
+            function loadMap() {
+                loadingIndicator.style.display = "block";
+
+                const webMap = new WebMap({
+                    portalItem: {
+                        id: CONFIG.webMapId,
+                        portal: {
+                            url: CONFIG.portalUrl
+                        }
+                    }
+                });
+
+                view = new MapView({
+                    container: "viewDiv",
+                    map: webMap
+                });
+
+                // Wait for view to load
+                view.when(function() {
+                    loadingIndicator.style.display = "none";
+
+                    // Add LayerList (Table of Contents) widget
+                    const layerList = new LayerList({
+                        view: view,
+                        listItemCreatedFunction: function(event) {
+                            const item = event.item;
+                            // Add legend to each layer item
+                            item.panel = {
+                                content: "legend",
+                                open: false
+                            };
+                        }
+                    });
+
+                    // Wrap in Expand widget for collapsible panel
+                    const layerListExpand = new Expand({
+                        view: view,
+                        content: layerList,
+                        expandIcon: "layers",
+                        expandTooltip: "Table of Contents",
+                        expanded: false
+                    });
+                    view.ui.add(layerListExpand, "top-right");
+
+                    // Add TimeSlider widget at the bottom - limited to 2025
+                    const timeSlider = new TimeSlider({
+                        container: document.createElement("div"),
+                        view: view,
+                        mode: "time-window",
+                        fullTimeExtent: {
+                            start: new Date(2025, 0, 1),
+                            end: new Date(2025, 11, 31)
+                        },
+                        playRate: 1000,
+                        stops: {
+                            interval: {
+                                value: 1,
+                                unit: "months"
+                            }
+                        }
+                    });
+                    view.ui.add(timeSlider, "bottom-leading");
+
+                    console.log("Map loaded successfully");
+
+                }).catch(function(error) {
+                    console.error("Error loading map:", error);
+                    loadingIndicator.innerHTML = "<p style='color: red;'>Error loading map. Please try again.</p>";
+                });
+            }
+        });
+    </script>
+</body>
+</html>
