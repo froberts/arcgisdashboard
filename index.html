@@ -161,6 +161,90 @@
             width: 100%;
             max-width: 800px;
         }
+
+        /* Stats panel */
+        #statsPanel {
+            position: absolute;
+            top: 120px;
+            left: 15px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 50;
+            min-width: 180px;
+        }
+
+        #statsPanel h3 {
+            margin: 0 0 8px 0;
+            font-size: 0.875rem;
+            color: #666;
+            font-weight: 500;
+        }
+
+        #statsPanel .stat-value {
+            font-size: 1.75rem;
+            font-weight: 600;
+            color: #2b2b2b;
+        }
+
+        #statsPanel .stat-label {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        /* Bar chart panel */
+        #chartPanel {
+            position: absolute;
+            bottom: 30px;
+            right: 15px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 50;
+            width: 350px;
+            height: 220px;
+        }
+
+        #chartPanel h3 {
+            margin: 0 0 10px 0;
+            font-size: 0.875rem;
+            color: #666;
+            font-weight: 500;
+        }
+
+        #chartPanel .expand-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #f0f0f0;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        #chartPanel .expand-btn:hover {
+            background: #e0e0e0;
+        }
+
+        #chartContainer {
+            width: 100%;
+            height: 180px;
+        }
+
+        #chartPanel.expanded {
+            width: 700px;
+            height: 440px;
+        }
+
+        #chartPanel.expanded #chartContainer {
+            height: 380px;
+        }
     </style>
 </head>
 <body>
@@ -181,6 +265,20 @@
                 <p>Loading map...</p>
             </div>
         </div>
+        <!-- Stats Panel -->
+        <div id="statsPanel" style="display: none;">
+            <h3>Total E-Waste</h3>
+            <div class="stat-value" id="ewasteTotal">0</div>
+            <div class="stat-label">for selected time period</div>
+        </div>
+        <!-- Bar Chart Panel -->
+        <div id="chartPanel" style="display: none;">
+            <button class="expand-btn" id="expandChartBtn">Expand</button>
+            <h3>E-Waste by Store</h3>
+            <div id="chartContainer">
+                <canvas id="ewasteChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <!-- Login Overlay -->
@@ -193,6 +291,22 @@
     </div>
 
     <script>
+        // Load Chart.js dynamically to avoid conflict with Dojo AMD loader
+        function loadChartJS(callback) {
+            // Temporarily hide AMD define to prevent Chart.js from using it
+            var originalDefine = window.define;
+            window.define = undefined;
+
+            var script = document.createElement("script");
+            script.src = "https://cdn.jsdelivr.net/npm/chart.js";
+            script.onload = function() {
+                // Restore AMD define
+                window.define = originalDefine;
+                callback();
+            };
+            document.head.appendChild(script);
+        }
+
         require([
             "esri/WebMap",
             "esri/views/MapView",
@@ -353,6 +467,185 @@
                         }
                     });
                     view.ui.add(timeSlider, "bottom-leading");
+
+                    // Find the e-waste layer and set up stats tracking
+                    const statsPanel = document.getElementById("statsPanel");
+                    const ewasteTotalEl = document.getElementById("ewasteTotal");
+                    const chartPanel = document.getElementById("chartPanel");
+                    let ewasteLayer = null;
+                    let ewasteFieldName = null;
+                    let storeFieldName = null;
+                    let ewasteChart = null;
+
+                    // Log all layers to help identify the correct one
+                    console.log("=== Available Layers ===");
+                    webMap.layers.forEach(function(layer) {
+                        console.log("Layer:", layer.title, "| Type:", layer.type);
+                    });
+
+                    // Search for e-waste layer - try multiple patterns or use first FeatureLayer
+                    webMap.layers.forEach(function(layer) {
+                        if (layer.type === "feature") {
+                            const layerTitle = layer.title ? layer.title.toLowerCase() : "";
+                            // Match various naming patterns
+                            if (layerTitle.includes("ewaste") || layerTitle.includes("e-waste") ||
+                                layerTitle.includes("e_waste") || layerTitle.includes("waste")) {
+                                ewasteLayer = layer;
+                            }
+                            // If no match yet, use first feature layer as fallback
+                            if (!ewasteLayer) {
+                                ewasteLayer = layer;
+                            }
+                        }
+                    });
+
+                    // If found, set up the stats
+                    if (ewasteLayer) {
+                        console.log("Using layer:", ewasteLayer.title);
+                        ewasteLayer.when(function() {
+                            // Log all fields to help identify the correct one
+                            console.log("=== Fields in", ewasteLayer.title, "===");
+                            ewasteLayer.fields.forEach(function(field) {
+                                console.log("Field:", field.name, "| Type:", field.type);
+                            });
+
+                            // Use specific field names
+                            ewasteFieldName = "Ewaste";
+                            storeFieldName = "StoreNumber";
+
+                            console.log("Using e-waste field:", ewasteFieldName);
+                            console.log("Using store field:", storeFieldName);
+
+                            if (ewasteFieldName) {
+                                statsPanel.style.display = "block";
+
+                                // Initialize bar chart if store field exists
+                                if (storeFieldName) {
+                                    loadChartJS(function() {
+                                        chartPanel.style.display = "block";
+                                        const ctx = document.getElementById("ewasteChart").getContext("2d");
+                                        ewasteChart = new Chart(ctx, {
+                                            type: "bar",
+                                            data: {
+                                                labels: [],
+                                                datasets: [{
+                                                    label: "E-Waste Volume",
+                                                    data: [],
+                                                    backgroundColor: "rgba(0, 121, 193, 0.7)",
+                                                    borderColor: "rgba(0, 121, 193, 1)",
+                                                    borderWidth: 1
+                                                }]
+                                            },
+                                            options: {
+                                                responsive: true,
+                                                maintainAspectRatio: false,
+                                                scales: {
+                                                    y: {
+                                                        beginAtZero: true,
+                                                        title: {
+                                                            display: true,
+                                                            text: "Volume"
+                                                        }
+                                                    },
+                                                    x: {
+                                                        title: {
+                                                            display: true,
+                                                            text: "Store"
+                                                        }
+                                                    }
+                                                },
+                                                plugins: {
+                                                    legend: {
+                                                        display: false
+                                                    }
+                                                }
+                                            }
+                                        });
+                                        // Initial stats calculation after chart is ready
+                                        updateEwasteStats(timeSlider.timeExtent);
+
+                                        // Toggle expand/collapse
+                                        document.getElementById("expandChartBtn").addEventListener("click", function() {
+                                            var panel = document.getElementById("chartPanel");
+                                            var btn = document.getElementById("expandChartBtn");
+                                            if (panel.classList.contains("expanded")) {
+                                                panel.classList.remove("expanded");
+                                                btn.textContent = "Expand";
+                                            } else {
+                                                panel.classList.add("expanded");
+                                                btn.textContent = "Shrink";
+                                            }
+                                            ewasteChart.resize();
+                                        });
+                                    });
+                                }
+
+                                // Update stats when time extent changes
+                                timeSlider.watch("timeExtent", function(timeExtent) {
+                                    updateEwasteStats(timeExtent);
+                                });
+
+                                // Initial stats calculation (for total, even if chart not ready)
+                                updateEwasteStats(timeSlider.timeExtent);
+                            } else {
+                                console.warn("No numeric field found for e-waste stats");
+                            }
+                        });
+                    } else {
+                        console.warn("No feature layer found for e-waste stats");
+                    }
+
+                    // Function to query and sum e-waste values
+                    function updateEwasteStats(timeExtent) {
+                        if (!ewasteLayer || !ewasteFieldName) return;
+
+                        const query = ewasteLayer.createQuery();
+                        query.where = "1=1";
+                        query.outFields = storeFieldName ? [ewasteFieldName, storeFieldName] : [ewasteFieldName];
+                        query.returnGeometry = false;
+
+                        if (timeExtent) {
+                            query.timeExtent = timeExtent;
+                        }
+
+                        ewasteLayer.queryFeatures(query).then(function(result) {
+                            let total = 0;
+                            const storeData = {};
+
+                            result.features.forEach(function(feature) {
+                                const value = feature.attributes[ewasteFieldName];
+                                if (value && !isNaN(value)) {
+                                    total += value;
+
+                                    // Aggregate by store
+                                    if (storeFieldName) {
+                                        const store = feature.attributes[storeFieldName] || "Unknown";
+                                        if (!storeData[store]) {
+                                            storeData[store] = 0;
+                                        }
+                                        storeData[store] += value;
+                                    }
+                                }
+                            });
+
+                            // Update total display
+                            ewasteTotalEl.textContent = total.toLocaleString();
+
+                            // Update bar chart
+                            if (ewasteChart && storeFieldName) {
+                                const stores = Object.keys(storeData).sort();
+                                const values = stores.map(function(store) {
+                                    return storeData[store];
+                                });
+
+                                ewasteChart.data.labels = stores;
+                                ewasteChart.data.datasets[0].data = values;
+                                ewasteChart.update();
+                            }
+                        }).catch(function(error) {
+                            console.error("Error querying e-waste stats:", error);
+                        });
+                    }
 
                     console.log("Map loaded successfully");
 
