@@ -313,10 +313,11 @@
             "esri/widgets/LayerList",
             "esri/widgets/Expand",
             "esri/widgets/TimeSlider",
+            "esri/widgets/BasemapGallery",
             "esri/identity/OAuthInfo",
             "esri/identity/IdentityManager",
             "esri/portal/Portal"
-        ], function(WebMap, MapView, LayerList, Expand, TimeSlider, OAuthInfo, IdentityManager, Portal) {
+        ], function(WebMap, MapView, LayerList, Expand, TimeSlider, BasemapGallery, OAuthInfo, IdentityManager, Portal) {
 
             // Configuration
             const CONFIG = {
@@ -448,6 +449,20 @@
                         expanded: false
                     });
                     view.ui.add(layerListExpand, "top-right");
+
+                    // Add BasemapGallery widget
+                    const basemapGallery = new BasemapGallery({
+                        view: view
+                    });
+
+                    const basemapExpand = new Expand({
+                        view: view,
+                        content: basemapGallery,
+                        expandIcon: "basemap",
+                        expandTooltip: "Basemap Gallery",
+                        expanded: false
+                    });
+                    view.ui.add(basemapExpand, "top-right");
 
                     // Add TimeSlider widget at the bottom - limited to 2025
                     const timeSlider = new TimeSlider({
